@@ -4,6 +4,19 @@
   
     
     <entry>
+      <title>关于python日志系统的实现</title>
+      <link href="/2025/12/08/%E5%85%B3%E4%BA%8Epython%E6%97%A5%E5%BF%97%E7%B3%BB%E7%BB%9F%E7%9A%84%E5%AE%9E%E7%8E%B0/"/>
+      <url>/2025/12/08/%E5%85%B3%E4%BA%8Epython%E6%97%A5%E5%BF%97%E7%B3%BB%E7%BB%9F%E7%9A%84%E5%AE%9E%E7%8E%B0/</url>
+      
+        <content type="html"><![CDATA[<h3 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h3><p>上周，公司要我给系统添加一个日志系统，当时感觉这个比较简单，于是使用<code>logging</code>实现没有用<code>loguru</code>，由于马上就要交付项目所以写的比较急。结果在日志轮转时报错了。在原本的日志系统中我使用的是<code>TimedRotatingFileHandler</code>。</p><p>错误如下：</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: <span class="string">&#x27;E:\\…………\\loggings\\app.log.1&#x27;</span></span><br></pre></td></tr></table></figure><p>这个错误发生在 <code>TimedRotatingFileHandler</code> 的 <code>doRollover()</code> 方法中，当它尝试重命名日志文件（如 <code>app.log</code> → <code>app.log.1</code>）时，发现原文件被其他进程或线程“锁定”了。</p><h3 id="具体细节"><a href="#具体细节" class="headerlink" title="具体细节"></a>具体细节</h3><p>首先，查看doRollver()方法，将其代码简化后如下：</p><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">doRollover</span>(<span class="params">self</span>):</span><br><span class="line">    <span class="keyword">if</span> <span class="variable language_">self</span>.stream:</span><br><span class="line">        <span class="variable language_">self</span>.stream.close()</span><br><span class="line">        <span class="variable language_">self</span>.stream = <span class="literal">None</span></span><br><span class="line">    <span class="comment"># get the time that this sequence started at and make it a TimeTuple</span></span><br><span class="line">    dfn = <span class="variable language_">self</span>.baseFilename + <span class="string">&quot;.&quot;</span> + time.strftime(<span class="variable language_">self</span>.suffix, timeTuple)</span><br><span class="line">    <span class="keyword">if</span> os.path.exists(dfn):</span><br><span class="line">        os.remove(dfn)</span><br><span class="line">    <span class="keyword">if</span> os.path.exists(<span class="variable language_">self</span>.baseFilename):</span><br><span class="line">        os.rename(<span class="variable language_">self</span>.baseFilename, dfn)</span><br><span class="line">    <span class="variable language_">self</span>.rolloverAt = newRolloverAt</span><br></pre></td></tr></table></figure><p>注意到<strong>在执行滚动（rotate）时，需要调用 <code>os.rename()</code> 来重命名旧日志文件，但 Windows 系统不允许对正在被打开&#x2F;写入的文件进行重命名。</strong></p><p>我们所使用的python服务器是fastapi，安装了WatchFiles并启用了reload。一开始怀疑是，中途修改代码而没有使用<code>atexit.register(Log.close)</code>导致服务重启后旧句柄未释放。</p><p>但后来发现WatchFiles的重启似乎不算正常结束进程，无法触发<code>atexit.register(Log.close)</code>，这时我又想到了fastapi本身就有一定的异步特性。不过这方面因为时间原因并没有深究。</p><h3 id="解决方法"><a href="#解决方法" class="headerlink" title="解决方法"></a>解决方法</h3><p>导入loguru使用loguru库重写了日志系统，设置<code>enqueue=True</code>，这种设置能够使得日志写入操作变得异步安全，但缺点是可能会导致实时性降低。</p><p>根据查阅到的资料，其内部似乎是一种MQ的实现。即日志消息被<strong>推入线程安全队列</strong>，由 <strong>独立的后台线程</strong> 负责消费队列并写入。成功推入队列则返回写入成功，而<strong>独立的后台线程</strong>以较恒定的速度消费队列。</p>]]></content>
+      
+      
+      
+    </entry>
+    
+    
+    
+    <entry>
       <title>code test</title>
       <link href="/2025/07/15/code-test/"/>
       <url>/2025/07/15/code-test/</url>
